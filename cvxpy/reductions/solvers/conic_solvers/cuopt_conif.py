@@ -15,7 +15,7 @@ limitations under the License.
 """
 
 import numpy as np
-
+import os
 import cvxpy.settings as s
 from cvxpy.reductions.solution import Solution, failure_solution
 from cvxpy.reductions.solvers.conic_solvers.conic_solver import (
@@ -74,8 +74,26 @@ class CUOPT(ConicSolver):
             from cuopt.linear_programming.data_model import DataModel
             from cuopt.linear_programming import solver
             self.use_service = False
+            return
         except Exception:
-            self.use_service = True
+            print("cuOpt is not installed locally. Trying the service ...")
+
+        try:
+            import cuopt_sh_client
+            import requests
+        except Exception:
+            print("cuopt_sh_client is not installed.")
+            raise
+
+        self.cuopt_ip = os.environ.get("CUOPT_SERVICE_HOST", "localhost")
+        self.cuopt_port = os.environ.get("CUOPT_SERVICE_IP", 5000)
+        try:
+            loc = f"http://{self.cuopt_ip}:{self.cuopt_port}"
+            res = requests.get(f"{loc}/coupt/health")
+        except Exception:
+            print(f"The cuOpt service is not running at {loc}")
+            raise
+        self.use_service = True
 
     def accepts(self, problem) -> bool:
         """Can cuopt solve the problem?
@@ -147,8 +165,6 @@ class CUOPT(ConicSolver):
         upper_bounds = np.concatenate([data['b'][0:leq_start], data['b'][leq_start:leq_end]])
         
         if self.use_service:
-            import os
-            
             d = {}
             d["maximize"] = False
             d["csr_constraint_matrix"] = {
