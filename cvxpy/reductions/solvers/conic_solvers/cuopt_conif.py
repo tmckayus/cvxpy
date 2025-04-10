@@ -18,6 +18,7 @@ import numpy as np
 import os
 import cvxpy.settings as s
 from cvxpy.reductions.solution import Solution, failure_solution
+from cvxpy.reductions.solvers import utilities
 from cvxpy.reductions.solvers.conic_solvers.conic_solver import (
     ConicSolver,
     dims_to_solver_dict,
@@ -121,7 +122,7 @@ class CUOPT(ConicSolver):
         variables = problem.x
         data[s.BOOL_IDX] = [int(t[0]) for t in variables.boolean_idx]
         data[s.INT_IDX] = [int(t[0]) for t in variables.integer_idx]
-
+        inv_data['lp'] = not (data[s.BOOL_IDX] or data[s.INT_IDX])
         return data, inv_data
 
     def invert(self, solution, inverse_data):
@@ -130,9 +131,23 @@ class CUOPT(ConicSolver):
         status = solution['status']
 
         if status in s.SOLUTION_PRESENT:
+            dual_vars = None
             opt_val = solution['value'] + inverse_data[s.OFFSET]
             primal_vars = {inverse_data[self.VAR_ID]: solution['primal']}
-            return Solution(status, opt_val, primal_vars, None, {})
+            if s.EQ_DUAL in solution and inverse_data['lp']:
+                eq_dual = utilities.get_dual_values(
+                    solution['eq_dual'],
+                    utilities.extract_dual_value,
+                    inverse_data[self.EQ_CONSTR])
+                leq_dual = utilities.get_dual_values(
+                    solution['ineq_dual'],
+                    utilities.extract_dual_value,
+                    inverse_data[self.NEQ_CONSTR])
+                eq_dual.update(leq_dual)
+                dual_vars = eq_dual
+
+            
+            return Solution(status, opt_val, primal_vars, dual_vars, {})
         else:
             return failure_solution(status)
 
@@ -199,6 +214,7 @@ class CUOPT(ConicSolver):
         else:
             from cuopt.linear_programming.data_model import DataModel
             from cuopt.linear_programming.solver import Solve
+            from cuopt.linear_programming.solver_settings import SolverSettings
             from cuopt.utilities import setup
             setup()
             
@@ -211,8 +227,11 @@ class CUOPT(ConicSolver):
             # Are bounds for integer variables contained in matrix?
             data_model.set_variable_lower_bounds(variable_lower_bounds)
             data_model.set_variable_upper_bounds(variable_upper_bounds)
-            data_model.set_variable_types(variable_types)            
-            cuopt_result = Solve(data_model)
+            data_model.set_variable_types(variable_types)
+
+            ss = SolverSettings()
+            ss.set_solver_mode(3)
+            cuopt_result = Solve(data_model, ss)
         
         print('Termination reason: ', cuopt_result.get_termination_reason())
 
@@ -220,6 +239,9 @@ class CUOPT(ConicSolver):
         if data[s.BOOL_IDX] or data[s.INT_IDX]:
             solution["status"] = self.STATUS_MAP_MIP[cuopt_result.get_termination_reason()]
         else:
+            solution["y"] = cuopt_result.get_dual_solution()
+            solution[s.EQ_DUAL] = solution["y"][0:dims[s.EQ_DIM]]
+            solution[s.INEQ_DUAL] = solution["y"][dims[s.EQ_DIM]:]            
             solution["status"] = self.STATUS_MAP_LP[cuopt_result.get_termination_reason()]
         solution["primal"] = cuopt_result.get_primal_solution()
         solution["value"] = cuopt_result.get_primal_objective()

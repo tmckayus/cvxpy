@@ -2461,11 +2461,11 @@ class TestCOPT(unittest.TestCase):
 
 @unittest.skipUnless("CUOPT" in INSTALLED_SOLVERS, "CUOPT is not installed.")
 class TestCUOPT(unittest.TestCase):
-    def test_cuopt_lp_0(self) -> None:
-        StandardTestLPs.test_lp_0(solver="CUOPT")
+#    def test_cuopt_lp_0(self) -> None:
+#        StandardTestLPs.test_lp_0(solver="CUOPT")
 
-#    def test_cuopt_lp_1(self) -> None:
-#        StandardTestLPs.test_lp_1(solver="CUOPT")
+    def test_cuopt_lp_1(self) -> None:
+        StandardTestLPs.test_lp_1(solver="CUOPT")
 
 #    def test_cuopt_lp_2(self) -> None:
 #        StandardTestLPs.test_lp_2(solver="CUOPT")
