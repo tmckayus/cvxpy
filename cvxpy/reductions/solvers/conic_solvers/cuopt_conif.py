@@ -40,13 +40,13 @@ class CUOPT(ConicSolver):
     # FeasibleFound = 2
     # Infeasible = 3
     # Unbounded = 4
-    
+
     STATUS_MAP_MIP = {0: s.SOLVER_ERROR,
                       1: s.OPTIMAL,
                       2: s.USER_LIMIT,
                       3: s.INFEASIBLE,
                       4: s.UNBOUNDED}
-    
+
     # LP termination reasons
     # NoTermination    = 0,
     # Optimal          = 1,
@@ -123,6 +123,7 @@ class CUOPT(ConicSolver):
         data[s.BOOL_IDX] = [int(t[0]) for t in variables.boolean_idx]
         data[s.INT_IDX] = [int(t[0]) for t in variables.integer_idx]
         inv_data['lp'] = not (data[s.BOOL_IDX] or data[s.INT_IDX])
+
         return data, inv_data
 
     def invert(self, solution, inverse_data):
@@ -135,18 +136,25 @@ class CUOPT(ConicSolver):
             opt_val = solution['value'] + inverse_data[s.OFFSET]
             primal_vars = {inverse_data[self.VAR_ID]: solution['primal']}
             if s.EQ_DUAL in solution and inverse_data['lp']:
-                eq_dual = utilities.get_dual_values(
-                    solution['eq_dual'],
-                    utilities.extract_dual_value,
-                    inverse_data[self.EQ_CONSTR])
-                leq_dual = utilities.get_dual_values(
-                    solution['ineq_dual'],
-                    utilities.extract_dual_value,
-                    inverse_data[self.NEQ_CONSTR])
-                eq_dual.update(leq_dual)
-                dual_vars = eq_dual
+                dual_vars = {}
+                if len(inverse_data[self.EQ_CONSTR]) > 0:
+                    print('solution[s.EQ_DUAL] ', solution[s.EQ_DUAL])
+                    eq_dual = utilities.get_dual_values(
+                        solution[s.EQ_DUAL],
+                        utilities.extract_dual_value,
+                        inverse_data[self.EQ_CONSTR])
+                    dual_vars.update(eq_dual)
+                if len(inverse_data[self.NEQ_CONSTR]) > 0:
+                    print('leq')
+                    print('solution[s.INEQ_DUAL] ', solution[s.INEQ_DUAL])
+                    print('inverse_data[self.NEQ_CONSTR] ', inverse_data[self.NEQ_CONSTR])
+                    leq_dual = utilities.get_dual_values(
+                        solution[s.INEQ_DUAL],
+                        utilities.extract_dual_value,
+                        inverse_data[self.NEQ_CONSTR])
+                    dual_vars.update(leq_dual)
 
-            
+
             return Solution(status, opt_val, primal_vars, dual_vars, {})
         else:
             return failure_solution(status)
@@ -175,10 +183,10 @@ class CUOPT(ConicSolver):
             variable_types[data[s.INT_IDX]] = 'I'
             variable_lower_bounds[data[s.BOOL_IDX]] = 0
             variable_upper_bounds[data[s.BOOL_IDX]] = 1
-        
+
         lower_bounds = np.concatenate([data['b'][0:leq_start], np.array([float('-inf') for _ in range(leq_start, leq_end)])])
         upper_bounds = np.concatenate([data['b'][0:leq_start], data['b'][leq_start:leq_end]])
-        
+
         if self.use_service:
             d = {}
             d["maximize"] = False
@@ -210,14 +218,14 @@ class CUOPT(ConicSolver):
                 port=port
             )
             res = cuopt_service_client.get_LP_solve(d, response_type='obj')
-            cuopt_result = res["response"]["solver_response"]["solution"]          
+            cuopt_result = res["response"]["solver_response"]["solution"]
         else:
             from cuopt.linear_programming.data_model import DataModel
             from cuopt.linear_programming.solver import Solve
             from cuopt.linear_programming.solver_settings import SolverSettings
             from cuopt.utilities import setup
             setup()
-            
+
             data_model = DataModel()
             data_model.set_csr_constraint_matrix(csr.data, csr.indices, csr.indptr)
             data_model.set_objective_coefficients(data['c'])
@@ -230,10 +238,10 @@ class CUOPT(ConicSolver):
             data_model.set_variable_types(variable_types)
 
             ss = SolverSettings()
-            #ss.set_solver_mode(3)
+            ss.set_solver_mode(3)
             ss.set_time_limit(5)
             cuopt_result = Solve(data_model, ss)
-        
+
         print('Termination reason: ', cuopt_result.get_termination_reason())
 
         solution = {}
@@ -241,16 +249,16 @@ class CUOPT(ConicSolver):
             solution["status"] = self.STATUS_MAP_MIP[cuopt_result.get_termination_reason()]
         else:
             #solution["y"] = cuopt_result.get_dual_solution()
-            solution[s.EQ_DUAL] = -cuopt_result.get_dual_solution()
-            solution[s.INEQ_DUAL] = cuopt_result.get_lp_stats()['reduced_cost']
+            solution[s.EQ_DUAL] = -cuopt_result.get_dual_solution()[0:leq_start]
+            solution[s.INEQ_DUAL] = -cuopt_result.get_dual_solution()[leq_start:leq_end]
             solution["status"] = self.STATUS_MAP_LP[cuopt_result.get_termination_reason()]
 
             a = open("stats", "a+")
-            
+
             a.write(f"dual solution {-cuopt_result.get_dual_solution()}\n")
             a.write(f"reduced cost {cuopt_result.get_lp_stats()['reduced_cost']}\n")
             a.close()
-            
+
         solution["primal"] = cuopt_result.get_primal_solution()
         solution["value"] = cuopt_result.get_primal_objective()
 
