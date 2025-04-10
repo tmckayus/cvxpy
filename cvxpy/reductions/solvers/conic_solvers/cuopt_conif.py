@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+
 import numpy as np
 import os
 import cvxpy.settings as s
@@ -34,27 +35,26 @@ class CUOPT(ConicSolver):
     SUPPORTED_CONSTRAINTS = ConicSolver.SUPPORTED_CONSTRAINTS + [NonPos]
     MI_SUPPORTED_CONSTRAINTS = SUPPORTED_CONSTRAINTS
 
-    # Map of CBC status to CVXPY status.
-    STATUS_MAP_MIP = {'solution': s.OPTIMAL,
-                      'relaxation infeasible': s.INFEASIBLE,
-                      'problem proven infeasible': s.INFEASIBLE,
-                      'relaxation abandoned': s.SOLVER_ERROR,
-                      'stopped on user event': s.SOLVER_ERROR,
-                      'stopped on nodes': s.OPTIMAL_INACCURATE,
-                      'stopped on gap': s.OPTIMAL_INACCURATE,
-                      'stopped on time': s.OPTIMAL_INACCURATE,
-                      'stopped on solutions': s.OPTIMAL_INACCURATE,
-                      'linear relaxation unbounded': s.UNBOUNDED,
-                      'unset': s.UNBOUNDED}
-
+    # NoTermination = 0
+    # Optimal = 1
+    # FeasibleFound = 2
+    # Infeasible = 3
+    # Unbounded = 4
+    
+    STATUS_MAP_MIP = {0: s.SOLVER_ERROR,
+                      1: s.OPTIMAL,
+                      2: s.USER_LIMIT,
+                      3: s.INFEASIBLE,
+                      4: s.UNBOUNDED}
+    
     # LP termination reasons
-   # NoTermination    = 0,
-   # Optimal          = 1,
-   # PrimalInfeasible = 2,
-   # DualInfeasible   = 3,
-   # IterationLimit   = 4,
-   # TimeLimit        = 5,
-   # PrimalFeasible   = 6,
+    # NoTermination    = 0,
+    # Optimal          = 1,
+    # PrimalInfeasible = 2,
+    # DualInfeasible   = 3,
+    # IterationLimit   = 4,
+    # TimeLimit        = 5,
+    # PrimalFeasible   = 6,
 
     STATUS_MAP_LP = {1: s.OPTIMAL,
                      2: s.INFEASIBLE,
@@ -231,6 +231,7 @@ class CUOPT(ConicSolver):
 
             ss = SolverSettings()
             ss.set_solver_mode(3)
+            ss.set_time_limit(5)
             cuopt_result = Solve(data_model, ss)
         
         print('Termination reason: ', cuopt_result.get_termination_reason())
@@ -241,7 +242,7 @@ class CUOPT(ConicSolver):
         else:
             solution["y"] = cuopt_result.get_dual_solution()
             solution[s.EQ_DUAL] = solution["y"][0:dims[s.EQ_DIM]]
-            solution[s.INEQ_DUAL] = solution["y"][dims[s.EQ_DIM]:]            
+            solution[s.INEQ_DUAL] = solution["y"][dims[s.EQ_DIM]:]
             solution["status"] = self.STATUS_MAP_LP[cuopt_result.get_termination_reason()]
         solution["primal"] = cuopt_result.get_primal_solution()
         solution["value"] = cuopt_result.get_primal_objective()
