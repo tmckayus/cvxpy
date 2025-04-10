@@ -230,7 +230,7 @@ class CUOPT(ConicSolver):
             data_model.set_variable_types(variable_types)
 
             ss = SolverSettings()
-            ss.set_solver_mode(3)
+            #ss.set_solver_mode(3)
             ss.set_time_limit(5)
             cuopt_result = Solve(data_model, ss)
         
@@ -240,10 +240,17 @@ class CUOPT(ConicSolver):
         if data[s.BOOL_IDX] or data[s.INT_IDX]:
             solution["status"] = self.STATUS_MAP_MIP[cuopt_result.get_termination_reason()]
         else:
-            solution["y"] = cuopt_result.get_dual_solution()
-            solution[s.EQ_DUAL] = solution["y"][0:dims[s.EQ_DIM]]
-            solution[s.INEQ_DUAL] = solution["y"][dims[s.EQ_DIM]:]
+            #solution["y"] = cuopt_result.get_dual_solution()
+            solution[s.EQ_DUAL] = -cuopt_result.get_dual_solution()
+            solution[s.INEQ_DUAL] = cuopt_result.get_lp_stats()['reduced_cost']
             solution["status"] = self.STATUS_MAP_LP[cuopt_result.get_termination_reason()]
+
+            a = open("stats", "a+")
+            
+            a.write(f"dual solution {-cuopt_result.get_dual_solution()}\n")
+            a.write(f"reduced cost {cuopt_result.get_lp_stats()['reduced_cost']}\n")
+            a.close()
+            
         solution["primal"] = cuopt_result.get_primal_solution()
         solution["value"] = cuopt_result.get_primal_objective()
 
