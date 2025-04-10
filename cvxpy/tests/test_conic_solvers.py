@@ -409,7 +409,7 @@ class TestSCS(BaseTest):
 
     def test_scs_sdp_pcp_1(self):
         StandardTestMixedCPs.test_sdp_pcp_1(solver='SCS')
-        
+
     def test_scs_pcp_1(self) -> None:
         StandardTestPCPs.test_pcp_1(solver='SCS')
 
@@ -527,7 +527,7 @@ class TestClarabel(BaseTest):
         StandardTestSDPs.test_sdp_1min(solver='CLARABEL')
 
     def test_clarabel_sdp_2(self) -> None:
-        # produces a different optimizer than 
+        # produces a different optimizer than
         # the one expected by the standard test
         places = 3
         sth = sths.sdp_2()
@@ -716,7 +716,7 @@ class TestMosek(unittest.TestCase):
     def test_mosek_sdp_power(self) -> None:
         """Test the problem in issue #2128"""
         StandardTestMixedCPs.test_sdp_pcp_1(solver='MOSEK')
-        
+
 
     def test_power_portfolio(self) -> None:
         """Test the portfolio problem in issue #2042"""
@@ -1732,7 +1732,7 @@ class TestGUROBI(BaseTest):
         StandardTestSOCPs.test_socp_3ax0(solver='GUROBI')
         # axis 1
         StandardTestSOCPs.test_socp_3ax1(solver='GUROBI')
-    
+
     def test_gurobi_socp_bound_attr(self) -> None:
         sth = StandardTestSOCPs.test_socp_bounds_attr(solver='GUROBI')
         # check that the bounds do reach the solver and don't just generate constraints
@@ -1982,7 +1982,7 @@ class TestNAG(BaseTest):
 
     def test_nag_quad_obj(self) -> None:
         """Test NAG canonicalization with a quadratic objective.
-        """    
+        """
         x = cp.Variable(2)
         expr = cp.sum_squares(x)
         constr = [x >= 1]
@@ -2144,7 +2144,7 @@ class TestHIGHS(unittest.TestCase):
 
     def test_highs_lp_4(self) -> None:
         StandardTestLPs.test_lp_4(solver="HIGHS")
-    
+
     def test_highs_lp_5(self) -> None:
         StandardTestLPs.test_lp_5(solver='HIGHS')
 
@@ -2162,8 +2162,8 @@ class TestHIGHS(unittest.TestCase):
 
     def test_highs_mi_lp_5(self) -> None:
         StandardTestLPs.test_mi_lp_5(solver='HIGHS')
-    
-    
+
+
 class TestAllSolvers(BaseTest):
 
     def setUp(self) -> None:
@@ -2462,24 +2462,23 @@ class TestCOPT(unittest.TestCase):
 @unittest.skipUnless("CUOPT" in INSTALLED_SOLVERS, "CUOPT is not installed.")
 class TestCUOPT(unittest.TestCase):
     def test_cuopt_lp_0(self) -> None:
-        StandardTestLPs.test_lp_0(solver="CUOPT", duals=True, places=1)
+        StandardTestLPs.test_lp_0(solver="CUOPT", duals=True, places=4)
 
     def test_cuopt_lp_1(self) -> None:
-        StandardTestLPs.test_lp_1(solver="CUOPT", duals=True, places=1)
+        StandardTestLPs.test_lp_1(solver="CUOPT", duals=True, places=4)
 
     def test_cuopt_lp_2(self) -> None:
-        StandardTestLPs.test_lp_2(solver="CUOPT", duals=True, places=1)
+        StandardTestLPs.test_lp_2(solver="CUOPT", duals=True, places=4)
 
     def test_cuopt_lp_3(self) -> None:
-        StandardTestLPs.test_lp_3(solver="CUOPT", duals=True, places=1)
+        StandardTestLPs.test_lp_3(solver="CUOPT", duals=True, places=4)
 
     def test_cuopt_lp_4(self) -> None:
-        StandardTestLPs.test_lp_4(solver="CUOPT", duals=True, places=1)
-    
-    def test_cuopt_lp_5(self) -> None:
-        StandardTestLPs.test_lp_5(solver='CUOPT', duals=True, places=1)
+        StandardTestLPs.test_lp_4(solver="CUOPT", duals=True, places=4)
 
-'''        
+    def test_cuopt_lp_5(self) -> None:
+        StandardTestLPs.test_lp_5(solver='CUOPT', duals=True, places=4)
+
     def test_cuopt_mi_lp_0(self) -> None:
         try:
             StandardTestLPs.test_mi_lp_0(solver='CUOPT')
@@ -2498,4 +2497,4 @@ class TestCUOPT(unittest.TestCase):
 
     def test_cuopt_mi_lp_5(self) -> None:
         StandardTestLPs.test_mi_lp_5(solver='CUOPT')
-''' 
+
