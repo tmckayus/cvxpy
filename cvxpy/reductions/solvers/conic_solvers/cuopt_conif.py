@@ -168,10 +168,10 @@ class CUOPT(ConicSolver):
         leq_end = dims[s.EQ_DIM] + dims[s.LEQ_DIM]
 
         num_vars = data['c'].shape[0]
-        print('Number of variables: ', num_vars)
-        print('Number of integer variables: ', len(data[s.BOOL_IDX]) + len(data[s.INT_IDX]))
-        print('Number of equality constraints: ', leq_start)
-        print('Number of inequality constraints: ', leq_end - leq_start)
+        #print('Number of variables: ', num_vars)
+        #print('Number of integer variables: ', len(data[s.BOOL_IDX]) + len(data[s.INT_IDX]))
+        #print('Number of equality constraints: ', leq_start)
+        #print('Number of inequality constraints: ', leq_end - leq_start)
 
          # No boolean vars available in Cbc -> model as int + restrict to [0,1]
         variable_types = np.array(['C'] * num_vars)
@@ -187,6 +187,11 @@ class CUOPT(ConicSolver):
         lower_bounds = np.concatenate([data['b'][0:leq_start], np.array([float('-inf') for _ in range(leq_start, leq_end)])])
         upper_bounds = np.concatenate([data['b'][0:leq_start], data['b'][leq_start:leq_end]])
 
+        from cuopt.linear_programming.solver_settings import SolverSettings
+        ss = SolverSettings()
+        ss.set_solver_mode(3)
+        ss.set_time_limit(5)
+        
         if self.use_service:
             d = {}
             d["maximize"] = False
@@ -209,20 +214,52 @@ class CUOPT(ConicSolver):
                 "lower_bounds": lower_bounds.tolist()
             }
             d["variable_types"] = variable_types.tolist()
+            d["solver_config"] = {
+                "time_limit": ss.get_time_limit(),
+                "solver_mode": ss.get_solver_mode()
+            }
+            
             from cuopt_sh_client import CuOptServiceSelfHostClient
-
             ip = os.environ.get("CUOPT_SERVICE_HOST", "localhost")
             port = os.environ.get("CUOPT_SERVICE_IP", 5000)
             cuopt_service_client = CuOptServiceSelfHostClient(
                 ip=ip,
                 port=port
             )
-            res = cuopt_service_client.get_LP_solve(d, response_type='obj')
-            cuopt_result = res["response"]["solver_response"]["solution"]
+
+            # In error case the client will raise an exception here
+            res = cuopt_service_client.get_LP_solve(d, response_type='obj', solver_config=ss)["response"]["solver_response"]
+            cuopt_result = res["solution"]
+
+            # If conversion to an object didn't work, then this means that we got an infeasible response
+            # or similar where expected fields were missing. Since we only need a subset of the object,
+            # build it here.
+            if isinstance(cuopt_result, dict):
+                from cuopt.linear_programming.solution import Solution
+                if data[s.BOOL_IDX] or data[s.INT_IDX]:
+                    pt = 1
+                    dual_solution = None
+                else:
+                    pt = 0
+                    dual_solution = cuopt_result.get("dual_solution", None)
+                    if dual_solution:
+                        dual_solution = np.array(dual_solution)
+                        
+                primal_solution = cuopt_result.get("primal_solution", None)
+                if primal_solution:
+                    primal_solution = np.array(primal_solution)
+                primal_objective = cuopt_result.get("primal_objective", 0.0)
+                                
+                cuopt_result = Solution(problem_category=pt,
+                                        vars=None,
+                                        dual_solution=dual_solution,
+                                        primal_solution=primal_solution,
+                                        primal_objective=primal_objective,
+                                        termination_reason=res["status"])
+            
         else:
             from cuopt.linear_programming.data_model import DataModel
             from cuopt.linear_programming.solver import Solve
-            from cuopt.linear_programming.solver_settings import SolverSettings
             from cuopt.utilities import setup
             setup()
 
@@ -237,30 +274,21 @@ class CUOPT(ConicSolver):
             data_model.set_variable_upper_bounds(variable_upper_bounds)
             data_model.set_variable_types(variable_types)
 
-            ss = SolverSettings()
-            ss.set_solver_mode(3)
-            ss.set_time_limit(5)
             cuopt_result = Solve(data_model, ss)
-
-        print('Termination reason: ', cuopt_result.get_termination_reason())
-
+            
+        #print('Termination reason: ', cuopt_result.get_termination_reason())
+        
         solution = {}
         if data[s.BOOL_IDX] or data[s.INT_IDX]:
             solution["status"] = self.STATUS_MAP_MIP[cuopt_result.get_termination_reason()]
         else:
-            #solution["y"] = cuopt_result.get_dual_solution()
-            solution[s.EQ_DUAL] = -cuopt_result.get_dual_solution()[0:leq_start]
-            solution[s.INEQ_DUAL] = -cuopt_result.get_dual_solution()[leq_start:leq_end]
+            d = cuopt_result.get_dual_solution()
+            if d is not None:
+                solution[s.EQ_DUAL] = -d[0:leq_start]
+                solution[s.INEQ_DUAL] = -d[leq_start:leq_end]
             solution["status"] = self.STATUS_MAP_LP[cuopt_result.get_termination_reason()]
-
-            a = open("stats", "a+")
-
-            a.write(f"dual solution {-cuopt_result.get_dual_solution()}\n")
-            a.write(f"reduced cost {cuopt_result.get_lp_stats()['reduced_cost']}\n")
-            a.close()
 
         solution["primal"] = cuopt_result.get_primal_solution()
         solution["value"] = cuopt_result.get_primal_objective()
-
         return solution
 
