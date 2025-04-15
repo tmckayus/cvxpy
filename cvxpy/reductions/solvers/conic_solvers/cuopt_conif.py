@@ -74,27 +74,17 @@ class CUOPT(ConicSolver):
         try:
             from cuopt.linear_programming.data_model import DataModel
             from cuopt.linear_programming import solver
-            self.use_service = False
-            return
+            self.local_install = True
         except Exception:
-            print("cuOpt is not installed locally. Trying the service ...")
+            self.local_install = False
 
         try:
             import cuopt_sh_client
-            import requests
+            self.service_install = True            
         except Exception:
-            print("cuopt_sh_client is not installed.")
-            raise
-
-        self.cuopt_ip = os.environ.get("CUOPT_SERVICE_HOST", "localhost")
-        self.cuopt_port = os.environ.get("CUOPT_SERVICE_IP", 5000)
-        try:
-            loc = f"http://{self.cuopt_ip}:{self.cuopt_port}"
-            res = requests.get(f"{loc}/coupt/health")
-        except Exception:
-            print(f"The cuOpt service is not running at {loc}")
-            raise
-        self.use_service = True
+            self.service_install = False
+            if not self.local_install:
+                raise
 
     def accepts(self, problem) -> bool:
         """Can cuopt solve the problem?
@@ -138,16 +128,16 @@ class CUOPT(ConicSolver):
             if s.EQ_DUAL in solution and inverse_data['lp']:
                 dual_vars = {}
                 if len(inverse_data[self.EQ_CONSTR]) > 0:
-                    print('solution[s.EQ_DUAL] ', solution[s.EQ_DUAL])
+                    #print('solution[s.EQ_DUAL] ', solution[s.EQ_DUAL])
                     eq_dual = utilities.get_dual_values(
                         solution[s.EQ_DUAL],
                         utilities.extract_dual_value,
                         inverse_data[self.EQ_CONSTR])
                     dual_vars.update(eq_dual)
                 if len(inverse_data[self.NEQ_CONSTR]) > 0:
-                    print('leq')
-                    print('solution[s.INEQ_DUAL] ', solution[s.INEQ_DUAL])
-                    print('inverse_data[self.NEQ_CONSTR] ', inverse_data[self.NEQ_CONSTR])
+                    #print('leq')
+                    #print('solution[s.INEQ_DUAL] ', solution[s.INEQ_DUAL])
+                    #print('inverse_data[self.NEQ_CONSTR] ', inverse_data[self.NEQ_CONSTR])
                     leq_dual = utilities.get_dual_values(
                         solution[s.INEQ_DUAL],
                         utilities.extract_dual_value,
@@ -159,8 +149,108 @@ class CUOPT(ConicSolver):
         else:
             return failure_solution(status)
 
-    def solve_via_data(self, data, warm_start: bool, verbose: bool, solver_opts, solver_cache=None):
+    # Returns a SolverSettings object
+    def _get_solver_settings(self, solver_opts, mip):
+        from cuopt.linear_programming.solver_settings import SolverSettings
 
+        def _apply(name, method):
+            if name in solver_opts:
+                method(solver_opts[name])
+        
+        ss = SolverSettings()
+
+        ss.set_solver_mode(solver_opts.get("solver_mode", 3))
+        if mip:
+            ss.set_time_limit(solver_opts.get("time_limit", 5))
+        else:
+            _apply("time_limit", ss.set_time_limit)
+
+        _apply("optimality_tolerance", ss.set_optimality_tolerance)
+        _apply("absolute_dual_tolerance", ss.set_absolute_dual_tolerance)
+        _apply("relative_dual_tolerance", ss.set_relative_dual_tolerance)
+        _apply("absolute_primal_tolerance", ss.set_absolute_primal_tolerance)
+        _apply("relative_primal_tolerance", ss.set_relative_primal_tolerance)
+        _apply("absolute_gap_tolerance", ss.set_absolute_gap_tolerance)
+        _apply("relative_gap_tolerance", ss.set_relative_gap_tolerance)
+        _apply("primal_infeasible_tolerance", ss.set_primal_infeasible_tolerance)
+        _apply("dual_infeasible_tolerance", ss.set_dual_infeasible_tolerance)        
+        _apply("integrality_tolerance", ss.set_integrality_tolerance)
+        _apply("infeasibility_detection", ss.set_infeasibility_detection)
+        _apply("iteration_limit", ss.set_iteration_limit)
+        _apply("mip_scaling", ss.set_mip_scaling)
+        _apply("mip_heuristics_only", ss.set_mip_heuristics_only)
+        _apply("mip_num_cpu_threads", ss.set_mip_num_cpu_threads)
+
+        return ss
+
+    # Returns a dictionary
+    def _get_solver_config(self, solver_opts, mip):
+        
+        def _apply(name, sc, alias=None):
+            if name in solver_opts:
+                if alias is None:
+                    alias = name
+                sc[alias] = solver_opts[name]
+        
+        solver_config = {}
+
+        solver_config["solver_mode"] = solver_opts.get("solver_mode", 3)
+        if mip:
+            solver_config["time_limit"] = solver_opts.get("time_limit", 5)
+        else:
+            _apply("time_limit", solver_config)
+
+        t = {}
+
+        _apply("optimality_tolerance", t, alias="optimality")
+        _apply("absolute_dual_tolerance", t, alias="absolute_dual")
+        _apply("relative_dual_tolerance", t, alias="relative_dual")
+        _apply("absolute_primal_tolerance", t, alias="absolute_primal")
+        _apply("relative_primal_tolerance", t, alias="relative_primal")
+        _apply("absolute_gap_tolerance", t, alias="absolute_gap")
+        _apply("relative_gap_tolerance", t, alias="relative_gap")
+        _apply("primal_infeasible_tolerance", t, alias="primal_infeasible")
+        _apply("dual_infeasible_tolerance", t, alias="dual_infeasible")        
+        _apply("integrality_tolerance", t)
+        solver_config["tolerances"] = t
+
+        _apply("infeasibility_detection", solver_config)
+        _apply("iteration_limit", solver_config)
+        _apply("mip_scaling", solver_config)
+        _apply("mip_heuristics_only", solver_config, alias="heuristics_only")
+        _apply("mip_num_cpu_threads", solver_config, alias="num_cpu_threads")       
+
+        return solver_config
+
+    def _get_client(self, solver_opts):
+        from cuopt_sh_client import CuOptServiceSelfHostClient
+        import requests
+
+        # Do a health check based on the service arguments        
+        ip = solver_opts.get("service_host", "localhost")
+        port = solver_opts.get("service_port", 5000)
+        scheme = solver_opts.get("service_scheme", "http")
+        try:
+            loc = f"{scheme}://{ip}:{port}"
+            res = requests.get(f"{loc}/coupt/health")
+        except Exception:
+            print(f"Error: cuopt service client is installed but cannot connect to the service at {loc}")
+            raise
+        return CuOptServiceSelfHostClient(ip=ip, port=port)        
+        
+    def solve_via_data(self, data, warm_start: bool, verbose: bool, solver_opts, solver_cache=None):
+        
+        use_service = solver_opts.get("use_service", False) in [True,"True","true"]      
+        if self.local_install ^ self.service_install:
+            if self.local_install:
+                if use_service:
+                    print("Warning: use_service ignored since cuopt service is not available")
+                use_service = False
+            else:
+                if not use_service:
+                    print("Warning: use_service ignored since cuopt is not installed locally")
+                use_service = True
+        
         csr = data[s.A].tocsr()
 
         dims = dims_to_solver_dict(data[s.DIMS])
@@ -168,6 +258,7 @@ class CUOPT(ConicSolver):
         leq_end = dims[s.EQ_DIM] + dims[s.LEQ_DIM]
 
         num_vars = data['c'].shape[0]
+        
         #print('Number of variables: ', num_vars)
         #print('Number of integer variables: ', len(data[s.BOOL_IDX]) + len(data[s.INT_IDX]))
         #print('Number of equality constraints: ', leq_start)
@@ -177,7 +268,9 @@ class CUOPT(ConicSolver):
         variable_types = np.array(['C'] * num_vars)
         variable_lower_bounds = np.array([float('-inf') for _ in range(num_vars)])
         variable_upper_bounds = np.array([float('inf') for _ in range(num_vars)])
-        if data[s.BOOL_IDX] or data[s.INT_IDX]:
+
+        is_mip = data[s.BOOL_IDX] or data[s.INT_IDX]
+        if is_mip:
             # Mark integer- and binary-vars as "integer"
             variable_types[data[s.BOOL_IDX]] = 'I'
             variable_types[data[s.INT_IDX]] = 'I'
@@ -186,13 +279,8 @@ class CUOPT(ConicSolver):
 
         lower_bounds = np.concatenate([data['b'][0:leq_start], np.array([float('-inf') for _ in range(leq_start, leq_end)])])
         upper_bounds = np.concatenate([data['b'][0:leq_start], data['b'][leq_start:leq_end]])
-
-        from cuopt.linear_programming.solver_settings import SolverSettings
-        ss = SolverSettings()
-        ss.set_solver_mode(3)
-        ss.set_time_limit(5)
         
-        if self.use_service:
+        if use_service:
             d = {}
             d["maximize"] = False
             d["csr_constraint_matrix"] = {
@@ -214,21 +302,12 @@ class CUOPT(ConicSolver):
                 "lower_bounds": lower_bounds.tolist()
             }
             d["variable_types"] = variable_types.tolist()
-            d["solver_config"] = {
-                "time_limit": ss.get_time_limit(),
-                "solver_mode": ss.get_solver_mode()
-            }
+            d["solver_config"] = self._get_solver_config(solver_opts, is_mip)
             
-            from cuopt_sh_client import CuOptServiceSelfHostClient
-            ip = os.environ.get("CUOPT_SERVICE_HOST", "localhost")
-            port = os.environ.get("CUOPT_SERVICE_IP", 5000)
-            cuopt_service_client = CuOptServiceSelfHostClient(
-                ip=ip,
-                port=port
-            )
+            cuopt_service_client = self._get_client(solver_opts)
 
             # In error case the client will raise an exception here
-            res = cuopt_service_client.get_LP_solve(d, response_type='obj', solver_config=ss)["response"]["solver_response"]
+            res = cuopt_service_client.get_LP_solve(d, response_type='obj')["response"]["solver_response"]
             cuopt_result = res["solution"]
 
             # If conversion to an object didn't work, then this means that we got an infeasible response
@@ -236,7 +315,7 @@ class CUOPT(ConicSolver):
             # build it here.
             if isinstance(cuopt_result, dict):
                 from cuopt.linear_programming.solution import Solution
-                if data[s.BOOL_IDX] or data[s.INT_IDX]:
+                if is_mip:
                     pt = 1
                     dual_solution = None
                 else:
@@ -274,15 +353,18 @@ class CUOPT(ConicSolver):
             data_model.set_variable_upper_bounds(variable_upper_bounds)
             data_model.set_variable_types(variable_types)
 
+            ss = self._get_solver_settings(solver_opts, is_mip)
             cuopt_result = Solve(data_model, ss)
             
         #print('Termination reason: ', cuopt_result.get_termination_reason())
         
         solution = {}
-        if data[s.BOOL_IDX] or data[s.INT_IDX]:
+        if is_mip:
             solution["status"] = self.STATUS_MAP_MIP[cuopt_result.get_termination_reason()]
         else:
-            d = cuopt_result.get_dual_solution()
+            # This really ought to be a getter but the service version of this class is missing it
+            # So just grab the result.
+            d = cuopt_result.dual_solution
             if d is not None:
                 solution[s.EQ_DUAL] = -d[0:leq_start]
                 solution[s.INEQ_DUAL] = -d[leq_start:leq_end]

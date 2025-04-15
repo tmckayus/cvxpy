@@ -2511,40 +2511,58 @@ class TestCOPT(unittest.TestCase):
 
 @unittest.skipUnless("CUOPT" in INSTALLED_SOLVERS, "CUOPT is not installed.")
 class TestCUOPT(unittest.TestCase):
+
+    import os
+    kwargs={"use_service": os.environ.get("CUOPT_USE_SERVICE", False),
+            "service_host":  os.environ.get("CUOPT_SERVICE_HOST", "localhost"),
+            "service_port": os.environ.get("CUOPT_SERVICE_PORT", 5000)
+            }
+    
     def test_cuopt_lp_0(self) -> None:
-        StandardTestLPs.test_lp_0(solver="CUOPT", duals=True, places=4)
+        StandardTestLPs.test_lp_0(solver="CUOPT", duals=True, places=4, **TestCUOPT.kwargs)
 
     def test_cuopt_lp_1(self) -> None:
-        StandardTestLPs.test_lp_1(solver="CUOPT", duals=True, places=4)
+        StandardTestLPs.test_lp_1(solver="CUOPT", duals=True, places=4, **TestCUOPT.kwargs)
 
     def test_cuopt_lp_2(self) -> None:
-        StandardTestLPs.test_lp_2(solver="CUOPT", duals=True, places=4)
+        StandardTestLPs.test_lp_2(solver="CUOPT", duals=True, places=4, **TestCUOPT.kwargs)
 
     def test_cuopt_lp_3(self) -> None:
-        StandardTestLPs.test_lp_3(solver="CUOPT", duals=True, places=4)
+        StandardTestLPs.test_lp_3(solver="CUOPT", duals=True, places=4, **TestCUOPT.kwargs)
 
     def test_cuopt_lp_4(self) -> None:
-        StandardTestLPs.test_lp_4(solver="CUOPT", duals=True, places=4)
+        StandardTestLPs.test_lp_4(solver="CUOPT", duals=True, places=4, **TestCUOPT.kwargs)
 
     def test_cuopt_lp_5(self) -> None:
-        StandardTestLPs.test_lp_5(solver='CUOPT', duals=True, places=4)
+        StandardTestLPs.test_lp_5(solver='CUOPT', duals=True, places=4, **TestCUOPT.kwargs)
 
+    def test_cuopt_lp_6(self) -> None:
+        StandardTestLPs.test_lp_5(solver='CUOPT', duals=True, places=4, **TestCUOPT.kwargs)
+
+    def test_cuopt_lp_7(self) -> None:
+        StandardTestLPs.test_lp_5(solver='CUOPT', duals=True, places=4, **TestCUOPT.kwargs)
+        
     def test_cuopt_mi_lp_0(self) -> None:
-        try:
-            StandardTestLPs.test_mi_lp_0(solver='CUOPT')
-        except Exception:
-            import traceback
-            traceback.print_exc()
+        StandardTestLPs.test_mi_lp_0(solver='CUOPT', **TestCUOPT.kwargs)
 
     def test_cuopt_mi_lp_1(self) -> None:
-        StandardTestLPs.test_mi_lp_1(solver='CUOPT')
+        StandardTestLPs.test_mi_lp_1(solver='CUOPT', **TestCUOPT.kwargs)
 
     def test_cuopt_mi_lp_2(self) -> None:
-        StandardTestLPs.test_mi_lp_2(solver='CUOPT')
+        StandardTestLPs.test_mi_lp_2(solver='CUOPT', **TestCUOPT.kwargs)
 
     def test_cuopt_mi_lp_3(self) -> None:
-        StandardTestLPs.test_mi_lp_3(solver='CUOPT')
+        StandardTestLPs.test_mi_lp_3(solver='CUOPT', **TestCUOPT.kwargs)
 
+    # This is an unconstrained problem, which cuopt doesn't handle
+    # It as least needs a dummy constraint like x >= 0 in this case
+    # (which should be redundant given that x is a boolean)
+#    def test_cuopt_mi_lp_4(self) -> None:
+#        StandardTestLPs.test_mi_lp_4(solver='CUOPT', **TestCUOPT.kwargs)
+        
     def test_cuopt_mi_lp_5(self) -> None:
-        StandardTestLPs.test_mi_lp_5(solver='CUOPT')
+        StandardTestLPs.test_mi_lp_5(solver='CUOPT', **TestCUOPT.kwargs)
+
+    def test_cuopt_mi_lp_7(self) -> None:
+        StandardTestLPs.test_mi_lp_5(solver='CUOPT', **TestCUOPT.kwargs, time_limit=5)
 
