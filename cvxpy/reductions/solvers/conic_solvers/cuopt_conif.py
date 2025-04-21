@@ -61,6 +61,7 @@ class CUOPT(ConicSolver):
                      3: s.UNBOUNDED,
                      4: s.SOLVER_ERROR,
                      5: s.SOLVER_ERROR,
+                     6: s.USER_LIMIT,
                      0: s.SOLVER_ERROR}
 
     def name(self):
