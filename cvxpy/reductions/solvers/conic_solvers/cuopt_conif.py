@@ -161,26 +161,32 @@ class CUOPT(ConicSolver):
         ss = SolverSettings()
 
         ss.set_solver_mode(solver_opts.get("solver_mode", 3))
-        if mip:
-            ss.set_time_limit(solver_opts.get("time_limit", 5))
-        else:
-            _apply("time_limit", ss.set_time_limit)
-
-        _apply("optimality_tolerance", ss.set_optimality_tolerance)
-        _apply("absolute_dual_tolerance", ss.set_absolute_dual_tolerance)
-        _apply("relative_dual_tolerance", ss.set_relative_dual_tolerance)
         _apply("absolute_primal_tolerance", ss.set_absolute_primal_tolerance)
         _apply("relative_primal_tolerance", ss.set_relative_primal_tolerance)
-        _apply("absolute_gap_tolerance", ss.set_absolute_gap_tolerance)
-        _apply("relative_gap_tolerance", ss.set_relative_gap_tolerance)
-        _apply("primal_infeasible_tolerance", ss.set_primal_infeasible_tolerance)
-        _apply("dual_infeasible_tolerance", ss.set_dual_infeasible_tolerance)        
-        _apply("integrality_tolerance", ss.set_integrality_tolerance)
-        _apply("infeasibility_detection", ss.set_infeasibility_detection)
-        _apply("iteration_limit", ss.set_iteration_limit)
-        _apply("mip_scaling", ss.set_mip_scaling)
-        _apply("mip_heuristics_only", ss.set_mip_heuristics_only)
-        _apply("mip_num_cpu_threads", ss.set_mip_num_cpu_threads)
+        
+        if mip:
+            # mip currently requires a time, set a default.
+            # This requirement will be removed soon.
+            ss.set_time_limit(solver_opts.get("time_limit", 1))
+            _apply("mip_scaling", ss.set_mip_scaling)
+            _apply("mip_heuristics_only", ss.set_mip_heuristics_only)
+            _apply("mip_num_cpu_threads", ss.set_mip_num_cpu_threads)
+
+            # mip-only tolerances
+            _apply("integrality_tolerance", ss.set_integrality_tolerance)
+        else:
+            _apply("time_limit", ss.set_time_limit)
+            _apply("infeasibility_detection", ss.set_infeasibility_detection)
+            _apply("iteration_limit", ss.set_iteration_limit)
+            
+            # lp-only tolerances
+            _apply("optimality_tolerance", ss.set_optimality_tolerance)
+            _apply("absolute_dual_tolerance", ss.set_absolute_dual_tolerance)
+            _apply("relative_dual_tolerance", ss.set_relative_dual_tolerance)
+            _apply("absolute_gap_tolerance", ss.set_absolute_gap_tolerance)
+            _apply("relative_gap_tolerance", ss.set_relative_gap_tolerance)
+            _apply("primal_infeasible_tolerance", ss.set_primal_infeasible_tolerance)
+            _apply("dual_infeasible_tolerance", ss.set_dual_infeasible_tolerance)
 
         return ss
 
@@ -192,35 +198,39 @@ class CUOPT(ConicSolver):
                 if alias is None:
                     alias = name
                 sc[alias] = solver_opts[name]
-        
-        solver_config = {}
 
+        solver_config = {}
         solver_config["solver_mode"] = solver_opts.get("solver_mode", 3)
+
+        t = {}        
+        _apply("absolute_primal_tolerance", t, alias="absolute_primal")
+        _apply("relative_primal_tolerance", t, alias="relative_primal")        
+        
         if mip:
-            solver_config["time_limit"] = solver_opts.get("time_limit", 5)
+            # mip currently requires a time, set a default.
+            # This requirement will be removed soon.            
+            solver_config["time_limit"] = solver_opts.get("time_limit", 1)
+            _apply("mip_scaling", solver_config)
+            _apply("mip_heuristics_only", solver_config, alias="heuristics_only")
+            _apply("mip_num_cpu_threads", solver_config, alias="num_cpu_threads")
+
+            # mip-only tolerances (note "t")
+            _apply("integrality_tolerance", t)
         else:
             _apply("time_limit", solver_config)
+            _apply("infeasibility_detection", solver_config)
+            _apply("iteration_limit", solver_config)
+            
+            # lp-only tolerances (note "t")
+            _apply("optimality_tolerance", t, alias="optimality")
+            _apply("absolute_dual_tolerance", t, alias="absolute_dual")
+            _apply("relative_dual_tolerance", t, alias="relative_dual")
+            _apply("absolute_gap_tolerance", t, alias="absolute_gap")
+            _apply("relative_gap_tolerance", t, alias="relative_gap")
+            _apply("primal_infeasible_tolerance", t, alias="primal_infeasible")
+            _apply("dual_infeasible_tolerance", t, alias="dual_infeasible")            
 
-        t = {}
-
-        _apply("optimality_tolerance", t, alias="optimality")
-        _apply("absolute_dual_tolerance", t, alias="absolute_dual")
-        _apply("relative_dual_tolerance", t, alias="relative_dual")
-        _apply("absolute_primal_tolerance", t, alias="absolute_primal")
-        _apply("relative_primal_tolerance", t, alias="relative_primal")
-        _apply("absolute_gap_tolerance", t, alias="absolute_gap")
-        _apply("relative_gap_tolerance", t, alias="relative_gap")
-        _apply("primal_infeasible_tolerance", t, alias="primal_infeasible")
-        _apply("dual_infeasible_tolerance", t, alias="dual_infeasible")        
-        _apply("integrality_tolerance", t)
         solver_config["tolerances"] = t
-
-        _apply("infeasibility_detection", solver_config)
-        _apply("iteration_limit", solver_config)
-        _apply("mip_scaling", solver_config)
-        _apply("mip_heuristics_only", solver_config, alias="heuristics_only")
-        _apply("mip_num_cpu_threads", solver_config, alias="num_cpu_threads")       
-
         return solver_config
 
     def _get_client(self, solver_opts):
