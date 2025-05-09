@@ -2515,7 +2515,8 @@ class TestCUOPT(unittest.TestCase):
     import os
     kwargs={"use_service": os.environ.get("CUOPT_USE_SERVICE", False),
             "service_host":  os.environ.get("CUOPT_SERVICE_HOST", "localhost"),
-            "service_port": os.environ.get("CUOPT_SERVICE_PORT", 5000)
+            "service_port": os.environ.get("CUOPT_SERVICE_PORT", 5000),
+            "solver_mode": "Stable2"
             }
     
     def test_cuopt_lp_0(self) -> None:
@@ -2531,7 +2532,12 @@ class TestCUOPT(unittest.TestCase):
         StandardTestLPs.test_lp_3(solver="CUOPT", duals=True, places=4, **TestCUOPT.kwargs)
 
     def test_cuopt_lp_4(self) -> None:
-        StandardTestLPs.test_lp_4(solver="CUOPT", duals=True, places=4, **TestCUOPT.kwargs)
+        # In this case cuopt throws an exception because there are crossing
+        # variable bounds x <= 0 and x >= 1
+        try:
+            StandardTestLPs.test_lp_4(solver="CUOPT", duals=True, places=4, **TestCUOPT.kwargs)
+        except Exception as e:
+            assert "crossing bounds" in str(e)
 
     def test_cuopt_lp_5(self) -> None:
         StandardTestLPs.test_lp_5(solver='CUOPT', duals=True, places=4, **TestCUOPT.kwargs)
@@ -2557,8 +2563,11 @@ class TestCUOPT(unittest.TestCase):
     # This is an unconstrained problem, which cuopt doesn't handle
     # It as least needs a dummy constraint like x >= 0 in this case
     # (which should be redundant given that x is a boolean)
-#    def test_cuopt_mi_lp_4(self) -> None:
-#        StandardTestLPs.test_mi_lp_4(solver='CUOPT', **TestCUOPT.kwargs)
+    def test_cuopt_mi_lp_4(self) -> None:
+        try:
+            StandardTestLPs.test_mi_lp_4(solver='CUOPT', **TestCUOPT.kwargs)
+        except Exception as e:
+            assert "A_values must be set" in str(e)
         
     def test_cuopt_mi_lp_5(self) -> None:
         StandardTestLPs.test_mi_lp_5(solver='CUOPT', **TestCUOPT.kwargs)

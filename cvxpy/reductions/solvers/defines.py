@@ -18,13 +18,14 @@ import numpy as np
 import scipy  # For version checks
 
 import cvxpy.settings as s
+
 # Conic interfaces
 from cvxpy.reductions.solvers.conic_solvers.cbc_conif import CBC as CBC_con
 from cvxpy.reductions.solvers.conic_solvers.clarabel_conif import CLARABEL as CLARABEL_con
 from cvxpy.reductions.solvers.conic_solvers.copt_conif import COPT as COPT_con
 from cvxpy.reductions.solvers.conic_solvers.cplex_conif import CPLEX as CPLEX_con
-from cvxpy.reductions.solvers.conic_solvers.cvxopt_conif import CVXOPT as CVXOPT_con
 from cvxpy.reductions.solvers.conic_solvers.cuopt_conif import CUOPT as CUOPT_con
+from cvxpy.reductions.solvers.conic_solvers.cvxopt_conif import CVXOPT as CVXOPT_con
 from cvxpy.reductions.solvers.conic_solvers.diffcp_conif import DIFFCP as DIFFCP_con
 from cvxpy.reductions.solvers.conic_solvers.ecos_bb_conif import ECOS_BB as ECOS_BB_con
 from cvxpy.reductions.solvers.conic_solvers.ecos_conif import ECOS as ECOS_con
