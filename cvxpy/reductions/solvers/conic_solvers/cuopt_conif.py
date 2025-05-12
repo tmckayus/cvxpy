@@ -172,11 +172,11 @@ class CUOPT(ConicSolver):
         ss.set_pdlp_solver_mode(self._solver_mode(solver_opts.get("solver_mode", "Stable2")))
         _apply("absolute_primal_tolerance", ss.set_absolute_primal_tolerance)
         _apply("relative_primal_tolerance", ss.set_relative_primal_tolerance)
-        
+        _apply("time_limit", ss.set_time_limit)
+
         if mip:
             # mip currently requires a time, set a default.
             # This requirement will be removed soon.
-            #ss.set_time_limit(solver_opts.get("time_limit", 1))
             _apply("mip_scaling", ss.set_mip_scaling)
             _apply("mip_heuristics_only", ss.set_mip_heuristics_only)
             _apply("mip_num_cpu_threads", ss.set_mip_num_cpu_threads)
@@ -184,7 +184,7 @@ class CUOPT(ConicSolver):
             # mip-only tolerances
             _apply("integrality_tolerance", ss.set_integrality_tolerance)
         else:
-            _apply("time_limit", ss.set_time_limit)
+
             _apply("infeasibility_detection", ss.set_infeasibility_detection)
             _apply("iteration_limit", ss.set_iteration_limit)
             
@@ -211,15 +211,13 @@ class CUOPT(ConicSolver):
         solver_config = {}
         solver_config["solver_mode"] = self._solver_mode(solver_opts.get("solver_mode", "Stable2"))
         solver_config["log_to_console"] = verbose
+        _apply("time_limit", solver_config)
 
-        t = {}        
+        t = {}
         _apply("absolute_primal_tolerance", t, alias="absolute_primal")
-        _apply("relative_primal_tolerance", t, alias="relative_primal")        
-        
+        _apply("relative_primal_tolerance", t, alias="relative_primal")
+
         if mip:
-            # mip currently requires a time, set a default.
-            # This requirement will be removed soon.            
-            #solver_config["time_limit"] = solver_opts.get("time_limit", 1)
             _apply("mip_scaling", solver_config)
             _apply("mip_heuristics_only", solver_config, alias="heuristics_only")
             _apply("mip_num_cpu_threads", solver_config, alias="num_cpu_threads")
@@ -227,7 +225,6 @@ class CUOPT(ConicSolver):
             # mip-only tolerances (note "t")
             _apply("integrality_tolerance", t)
         else:
-            _apply("time_limit", solver_config)
             _apply("infeasibility_detection", solver_config)
             _apply("iteration_limit", solver_config)
             
@@ -377,8 +374,6 @@ class CUOPT(ConicSolver):
         leq_end = dims[s.EQ_DIM] + dims[s.LEQ_DIM]
 
         # Get constraint bounds
-        import pdb
-        pdb.set_trace()
         if dims[s.EQ_DIM] == 0 and dims[s.LEQ_DIM] == 0:
             # No constraints in original problem, add dummy constraints
             n_vars = data['c'].shape[0]
