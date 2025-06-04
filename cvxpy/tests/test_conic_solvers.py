@@ -2516,7 +2516,7 @@ class TestCUOPT(unittest.TestCase):
     kwargs={"use_service": os.environ.get("CUOPT_USE_SERVICE", False),
             "service_host":  os.environ.get("CUOPT_SERVICE_HOST", "localhost"),
             "service_port": os.environ.get("CUOPT_SERVICE_PORT", 5000),
-            "pdlp_solver_mode": os.environ.get("CUOPT_PDLP_SOLVER_MODE", "Stable2")
+            "pdlp_solver_mode": os.environ.get("CUOPT_PDLP_SOLVER_MODE", "Stable2"),
             "solver_method": os.environ.get("CUOPT_SOLVER_METHOD", 0)
             }
 
@@ -2563,14 +2563,16 @@ class TestCUOPT(unittest.TestCase):
         StandardTestLPs.test_mi_lp_3(solver='CUOPT', **TestCUOPT.kwargs)
         del TestCUOPT.kwargs["time_limit"]
 
-    # This is an unconstrained problem, which cuopt doesn't handle
-    # It at least needs a dummy constraint like x >= 0 in this case
-    # (which should be redundant given that x is a boolean)
+    # This is an unconstrained problem, which cuopt doesn't handle.
+    # An empty constraint matrix is not allowed.
     def test_cuopt_mi_lp_4(self) -> None:
         try:
             StandardTestLPs.test_mi_lp_4(solver='CUOPT', **TestCUOPT.kwargs)
         except Exception as e:
-            assert "A_values must be set" in str(e)
+            if TestCUOPT.kwargs["use_service"] in [True, "true", "True"]:
+                assert "zero-size array" in str(e)
+            else:
+                assert "A_offsets must be set" in str(e)
 
     def test_cuopt_mi_lp_5(self) -> None:
         TestCUOPT.kwargs["time_limit"] = 5

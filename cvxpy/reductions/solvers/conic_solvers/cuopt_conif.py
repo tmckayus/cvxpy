@@ -26,6 +26,7 @@ from cvxpy.reductions.solvers.conic_solvers.conic_solver import (
     ConicSolver,
     dims_to_solver_dict,
 )
+from cvxpy.utilities.citations import CITATION_DICT
 
 # Wrap cuopt imports in an exception handler so that we
 # can have them at module level but not break if cuoopt
@@ -292,22 +293,6 @@ class CUOPT(ConicSolver):
         return CuOptServiceSelfHostClient(ip=ip, port=port)
 
 
-    def add_dummy_single_constraint(self, n_variables):
-        from scipy import sparse
-        # Create sparse CSR with one row, first element = 1
-        data = np.ones(1)
-        indices = np.zeros(1, dtype=int)
-        indptr = np.array([0, 1])
-
-        CSR = sparse.csr_matrix((data, indices, indptr),
-                       shape=(1, n_variables))
-
-        # Inequality constraint bounds (-inf < x <= inf)
-        lower_bounds = np.array([0])
-        upper_bounds = np.array([10])
-
-        return CSR, lower_bounds, upper_bounds
-
     def solve_via_data(self, data, warm_start: bool, verbose: bool, solver_opts, solver_cache=None):
         use_service = solver_opts.get("use_service", False) in [True,"True","true"]
         if self.local_install ^ self.service_install:
@@ -332,15 +317,10 @@ class CUOPT(ConicSolver):
         leq_end = dims[s.EQ_DIM] + dims[s.LEQ_DIM]
 
         # Get constraint bounds
-        if dims[s.EQ_DIM] == 0 and dims[s.LEQ_DIM] == 0:
-            # No constraints in original problem, add dummy constraints
-            n_vars = data['c'].shape[0]
-            csr, lower_bounds, upper_bounds = self.add_dummy_single_constraint(n_vars)
-        else:
-            lower_bounds = np.empty(leq_end)
-            lower_bounds[:leq_start] = data['b'][:leq_start]
-            lower_bounds[leq_start:leq_end] = float('-inf')
-            upper_bounds = data['b'][:leq_end].copy()
+        lower_bounds = np.empty(leq_end)
+        lower_bounds[:leq_start] = data['b'][:leq_start]
+        lower_bounds[leq_start:leq_end] = float('-inf')
+        upper_bounds = data['b'][:leq_end].copy()
 
         # Initialize variable types and bounds
         variable_types = np.full(num_vars, 'C', dtype='U1')
@@ -437,22 +417,6 @@ class CUOPT(ConicSolver):
             data_model.set_variable_types(variable_types)
 
             ss = self._get_solver_settings(solver_opts, is_mip, verbose)
-
-            import pickle
-            if True:
-                with open("cuopt.pickle", "wb") as f:
-                    pickle.dump(ss, f)
-                    pickle.dump(csr.data, f)
-                    pickle.dump(csr.indices, f)
-                    pickle.dump(csr.indptr, f)
-                    pickle.dump(data['c'], f)
-                    pickle.dump(lower_bounds, f)
-                    pickle.dump(upper_bounds, f)
-                    pickle.dump(variable_lower_bounds, f)
-                    pickle.dump(variable_upper_bounds, f)
-                    pickle.dump(variable_types, f)
-
-
             cuopt_result = Solve(data_model, ss)
 
 
@@ -476,3 +440,12 @@ class CUOPT(ConicSolver):
         solution["value"] = cuopt_result.get_primal_objective()
         return solution
 
+    def cite(self, data):
+        """Returns bibtex citation for the solver.
+
+        Parameters
+        ----------
+        data : dict
+            Data generated via an apply call.
+        """
+        return CITATION_DICT["CUOPT"]
