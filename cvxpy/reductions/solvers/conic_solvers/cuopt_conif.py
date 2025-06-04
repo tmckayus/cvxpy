@@ -27,6 +27,49 @@ from cvxpy.reductions.solvers.conic_solvers.conic_solver import (
     dims_to_solver_dict,
 )
 
+# Wrap cuopt imports in an exception handler so that we
+# can have them at module level but not break if cuoopt
+# is not installed
+try:
+    from cuopt.linear_programming.solver.solver_wrapper import (
+        MILPTerminationStatus,
+        LPTerminationStatus,
+        ErrorStatus
+    )
+    from cuopt.linear_programming.solver_settings import PDLPSolverMode
+    from cuopt.linear_programming.solver_settings import SolverSettings
+    from cuopt.linear_programming.solver.solver_parameters import (
+        CUOPT_ABSOLUTE_DUAL_TOLERANCE,
+        CUOPT_ABSOLUTE_GAP_TOLERANCE,
+        CUOPT_ABSOLUTE_PRIMAL_TOLERANCE,
+        CUOPT_CROSSOVER,
+        CUOPT_DUAL_INFEASIBLE_TOLERANCE,
+        CUOPT_INFEASIBILITY_DETECTION,
+        CUOPT_ITERATION_LIMIT,
+        CUOPT_LOG_TO_CONSOLE,
+        CUOPT_METHOD,
+        CUOPT_MIP_ABSOLUTE_GAP,
+        CUOPT_MIP_HEURISTICS_ONLY,
+        CUOPT_MIP_INTEGRALITY_TOLERANCE,
+        CUOPT_MIP_RELATIVE_GAP,
+        CUOPT_MIP_SCALING,
+        CUOPT_NUM_CPU_THREADS,
+        CUOPT_PDLP_SOLVER_MODE,
+        CUOPT_PRIMAL_INFEASIBLE_TOLERANCE,
+        CUOPT_RELATIVE_DUAL_TOLERANCE,
+        CUOPT_RELATIVE_GAP_TOLERANCE,
+        CUOPT_RELATIVE_PRIMAL_TOLERANCE,
+        CUOPT_TIME_LIMIT,
+        )
+    cuopt_present = True
+except Exception:
+    cuopt_present = False
+
+try:
+    from cuopt_sh_client import CuOptServiceSelfHostClient
+    cuopt_client_present = True
+except Exception:
+    cuopt_client_present = False
 
 class CUOPT(ConicSolver):
     """ An interface to the cuOpt solver
@@ -36,42 +79,31 @@ class CUOPT(ConicSolver):
     SUPPORTED_CONSTRAINTS = ConicSolver.SUPPORTED_CONSTRAINTS + [NonPos]
     MI_SUPPORTED_CONSTRAINTS = SUPPORTED_CONSTRAINTS
 
-    # NoTermination = 0
-    # Optimal = 1
-    # FeasibleFound = 2
-    # Infeasible = 3
-    # Unbounded = 4
+    STATUS_MAP_MIP = {
+        MILPTerminationStatus.NoTermination: s.SOLVER_ERROR,
+        MILPTerminationStatus.Optimal: s.OPTIMAL,
+        MILPTerminationStatus.FeasibleFound: s.USER_LIMIT,
+        MILPTerminationStatus.Infeasible: s.INFEASIBLE,
+        MILPTerminationStatus.Unbounded: s.UNBOUNDED,
+        MILPTerminationStatus.TimeLimit: s.USER_LIMIT
+    }
 
-    STATUS_MAP_MIP = {"NoTermination": s.SOLVER_ERROR,
-                      "Optimal": s.OPTIMAL,
-                      "FeasibleFound": s.USER_LIMIT,
-                      "Infeasible": s.INFEASIBLE,
-                      "Unbounded": s.UNBOUNDED}
-
-    # LP termination reasons
-    # NoTermination    = 0,
-    # Optimal          = 1,
-    # PrimalInfeasible = 2,
-    # DualInfeasible   = 3,
-    # IterationLimit   = 4,
-    # TimeLimit        = 5,
-    # PrimalFeasible   = 6,
-
-    STATUS_MAP_LP = {"NumericalError": s.SOLVER_ERROR,
-                     "Optimal": s.OPTIMAL,
-                     "PrimalInfeasible": s.INFEASIBLE,
-                     "DualInfeasible": s.INFEASIBLE,
-                     "IterationLimit": s.USER_LIMIT,
-                     "TimeLimit": s.USER_LIMIT,
-                     "PrimalFeasible": s.USER_LIMIT,
-                     "ConcurrentLimit": s.SOLVER_ERROR}
+    STATUS_MAP_LP = {
+        LPTerminationStatus.NoTermination: s.SOLVER_ERROR,
+        LPTerminationStatus.NumericalError: s.SOLVER_ERROR,
+        LPTerminationStatus.Optimal: s.OPTIMAL,
+        LPTerminationStatus.PrimalInfeasible: s.INFEASIBLE,
+        LPTerminationStatus.DualInfeasible: s.UNBOUNDED,
+        LPTerminationStatus.IterationLimit: s.USER_LIMIT,
+        LPTerminationStatus.TimeLimit: s.USER_LIMIT,
+        LPTerminationStatus.PrimalFeasible: s.USER_LIMIT
+    }
 
     def _solver_mode(self, m):
-        from cuopt.linear_programming.solver_settings import SolverMode
-        solver_modes = {"Stable1": SolverMode.Stable1,
-                        "Stable2": SolverMode.Stable2,
-                        "Methodical1": SolverMode.Methodical1,
-                        "Fast1": SolverMode.Fast1}
+        solver_modes = {"Stable1": PDLPSolverMode.Stable1,
+                        "Stable2": PDLPSolverMode.Stable2,
+                        "Methodical1": PDLPSolverMode.Methodical1,
+                        "Fast1": PDLPSolverMode.Fast1}
         return solver_modes[m]
 
 
@@ -83,17 +115,10 @@ class CUOPT(ConicSolver):
     def import_solver(self) -> None:
         """Imports the solver.
         """
-        try:
-            self.local_install = True
-        except Exception:
-            self.local_install = False
-
-        try:
-            self.service_install = True            
-        except Exception:
-            self.service_install = False
-            if not self.local_install:
-                raise
+        self.local_install = cuopt_present
+        self.service_install = cuopt_client_present
+        if not (self.local_install or self.service_install):
+            raise
 
     def accepts(self, problem) -> bool:
         """Can cuopt solve the problem?
@@ -160,43 +185,43 @@ class CUOPT(ConicSolver):
 
     # Returns a SolverSettings object
     def _get_solver_settings(self, solver_opts, mip, verbose):
-        from cuopt.linear_programming.solver_settings import SolverSettings
-
-        def _apply(name, method):
-            if name in solver_opts:
-                method(solver_opts[name])
-        
         ss = SolverSettings()
-        ss.set_log_to_console(verbose)
+        # Always need to map to verbose
+        ss.set_parameter(CUOPT_LOG_TO_CONSOLE, verbose)
 
-        ss.set_pdlp_solver_mode(self._solver_mode(solver_opts.get("solver_mode", "Stable2")))
-        _apply("absolute_primal_tolerance", ss.set_absolute_primal_tolerance)
-        _apply("relative_primal_tolerance", ss.set_relative_primal_tolerance)
-        _apply("time_limit", ss.set_time_limit)
+        # Special handling for the enum value
+        if CUOPT_PDLP_SOLVER_MODE in solver_opts:
+            ss.set_parameter(CUOPT_PDLP_SOLVER_MODE,
+                             self._solver_mode(solver_opts[CUOPT_PDLP_SOLVER_MODE]))
 
-        if mip:
-            # mip currently requires a time, set a default.
-            # This requirement will be removed soon.
-            _apply("mip_scaling", ss.set_mip_scaling)
-            _apply("mip_heuristics_only", ss.set_mip_heuristics_only)
-            _apply("mip_num_cpu_threads", ss.set_mip_num_cpu_threads)
+        # Name collision with "method" in cvxpy
+        if "solver_method" in solver_opts:
+            ss.set_parameter(CUOPT_METHOD, solver_opts["solver_method"])
 
-            # mip-only tolerances
-            _apply("integrality_tolerance", ss.set_integrality_tolerance)
-        else:
+        if "optimality" in solver_opts:
+            ss.set_optimality_tolerance(solver_opts["optimality"])
 
-            _apply("infeasibility_detection", ss.set_infeasibility_detection)
-            _apply("iteration_limit", ss.set_iteration_limit)
-            
-            # lp-only tolerances
-            _apply("optimality_tolerance", ss.set_optimality_tolerance)
-            _apply("absolute_dual_tolerance", ss.set_absolute_dual_tolerance)
-            _apply("relative_dual_tolerance", ss.set_relative_dual_tolerance)
-            _apply("absolute_gap_tolerance", ss.set_absolute_gap_tolerance)
-            _apply("relative_gap_tolerance", ss.set_relative_gap_tolerance)
-            _apply("primal_infeasible_tolerance", ss.set_primal_infeasible_tolerance)
-            _apply("dual_infeasible_tolerance", ss.set_dual_infeasible_tolerance)
-
+        for p in [
+                CUOPT_ABSOLUTE_DUAL_TOLERANCE,
+                CUOPT_ABSOLUTE_GAP_TOLERANCE,
+                CUOPT_ABSOLUTE_PRIMAL_TOLERANCE,
+                CUOPT_CROSSOVER,
+                CUOPT_DUAL_INFEASIBLE_TOLERANCE,
+                CUOPT_INFEASIBILITY_DETECTION,
+                CUOPT_ITERATION_LIMIT,
+                CUOPT_MIP_ABSOLUTE_GAP,
+                CUOPT_MIP_HEURISTICS_ONLY,
+                CUOPT_MIP_INTEGRALITY_TOLERANCE,
+                CUOPT_MIP_RELATIVE_GAP,
+                CUOPT_MIP_SCALING,
+                CUOPT_NUM_CPU_THREADS,
+                CUOPT_PRIMAL_INFEASIBLE_TOLERANCE,
+                CUOPT_RELATIVE_DUAL_TOLERANCE,
+                CUOPT_RELATIVE_GAP_TOLERANCE,
+                CUOPT_RELATIVE_PRIMAL_TOLERANCE,
+                CUOPT_TIME_LIMIT]:
+            if p in solver_opts:
+                ss.set_parameter(p, solver_opts[p])
         return ss
 
     # Returns a dictionary
@@ -209,42 +234,51 @@ class CUOPT(ConicSolver):
                 sc[alias] = solver_opts[name]
 
         solver_config = {}
-        solver_config["solver_mode"] = self._solver_mode(solver_opts.get("solver_mode", "Stable2"))
-        solver_config["log_to_console"] = verbose
-        _apply("time_limit", solver_config)
+
+        # Always need to map to verbose
+        solver_config[CUOPT_LOG_TO_CONSOLE] = verbose
+
+        # Special handling for the enum value
+        if CUOPT_PDLP_SOLVER_MODE in solver_opts:
+            solver_config[CUOPT_PDLP_SOLVER_MODE] = self._solver_mode(solver_opts[CUOPT_PDLP_SOLVER_MODE])
+
+        # Name collision with "method" in cvxpy
+        if "solver_method" in solver_opts:
+            solver_config[CUOPT_METHOD] = solver_opts["solver_method"]
+
+        for p in [
+                CUOPT_CROSSOVER,
+                CUOPT_INFEASIBILITY_DETECTION,
+                CUOPT_ITERATION_LIMIT,
+                CUOPT_MIP_HEURISTICS_ONLY,
+                CUOPT_MIP_SCALING,
+                CUOPT_NUM_CPU_THREADS,
+                CUOPT_TIME_LIMIT]:
+            _apply(p, solver_config)
 
         t = {}
-        _apply("absolute_primal_tolerance", t, alias="absolute_primal")
-        _apply("relative_primal_tolerance", t, alias="relative_primal")
-
-        if mip:
-            _apply("mip_scaling", solver_config)
-            _apply("mip_heuristics_only", solver_config, alias="heuristics_only")
-            _apply("mip_num_cpu_threads", solver_config, alias="num_cpu_threads")
-
-            # mip-only tolerances (note "t")
-            _apply("integrality_tolerance", t)
-        else:
-            _apply("infeasibility_detection", solver_config)
-            _apply("iteration_limit", solver_config)
-            
-            # lp-only tolerances (note "t")
-            _apply("optimality_tolerance", t, alias="optimality")
-            _apply("absolute_dual_tolerance", t, alias="absolute_dual")
-            _apply("relative_dual_tolerance", t, alias="relative_dual")
-            _apply("absolute_gap_tolerance", t, alias="absolute_gap")
-            _apply("relative_gap_tolerance", t, alias="relative_gap")
-            _apply("primal_infeasible_tolerance", t, alias="primal_infeasible")
-            _apply("dual_infeasible_tolerance", t, alias="dual_infeasible")            
+        for name, alias in [
+                (CUOPT_ABSOLUTE_DUAL_TOLERANCE,     "absolue_dual"),
+                (CUOPT_ABSOLUTE_GAP_TOLERANCE,      "absolute_gap"),
+                (CUOPT_ABSOLUTE_PRIMAL_TOLERANCE,   "absolute_primal"),
+                (CUOPT_DUAL_INFEASIBLE_TOLERANCE,   "dual_infeasible"),
+                (CUOPT_PRIMAL_INFEASIBLE_TOLERANCE, "primal_infeasible"),
+                (CUOPT_RELATIVE_DUAL_TOLERANCE,     "relative_dual"),
+                (CUOPT_RELATIVE_GAP_TOLERANCE,      "relative_gap"),
+                (CUOPT_RELATIVE_PRIMAL_TOLERANCE,   "relative_primal"),
+                (CUOPT_MIP_ABSOLUTE_GAP, None),
+                (CUOPT_MIP_INTEGRALITY_TOLERANCE, None),
+                (CUOPT_MIP_RELATIVE_GAP, None),
+                ("optimality", None)]:
+            _apply(name, t, alias)
 
         solver_config["tolerances"] = t
         return solver_config
 
     def _get_client(self, solver_opts):
         import requests
-        from cuopt_sh_client import CuOptServiceSelfHostClient
 
-        # Do a health check based on the service arguments        
+        # Do a health check based on the service arguments
         ip = solver_opts.get("service_host", "localhost")
         port = solver_opts.get("service_port", 5000)
         scheme = solver_opts.get("service_scheme", "http")
@@ -255,85 +289,8 @@ class CUOPT(ConicSolver):
             print("Error: cuopt service client is installed but cannot "
                   f"connect to the service at {loc}")
             raise
-        return CuOptServiceSelfHostClient(ip=ip, port=port)        
+        return CuOptServiceSelfHostClient(ip=ip, port=port)
 
-
-    def _extract_variable_bounds(self, CSR, lower_bounds, upper_bounds, variable_types=None):
-        """
-        Find single-variable constraints and extract their bounds.
-
-        Args:
-            CSR: scipy.sparse.csr_matrix
-            lower_bounds: array of lower bounds for constraints
-            upper_bounds: array of upper bounds for constraints
-            variable_types: array of variable types ('C', 'I', or 'B')
-        Returns:
-            var_lower_bounds: array of lower bounds for variables
-            var_upper_bounds: array of upper bounds for variables
-        """
-        n_variables = CSR.shape[1]
-
-        # Initialize bounds arrays with infinity
-        var_lower_bounds = np.full(n_variables, -np.inf)
-        var_upper_bounds = np.full(n_variables, np.inf)
-
-        # If we have variable types, set initial bounds for binary variables
-        if variable_types is not None:
-            binary_vars = variable_types == 'B'
-            var_lower_bounds[binary_vars] = 0
-            var_upper_bounds[binary_vars] = 1
-        
-        # Find rows with exactly one non-zero
-        row_nnz = np.diff(CSR.indptr)  # number of non-zeros in each row
-        single_coef_rows = row_nnz == 1
-
-        if np.any(single_coef_rows):
-            # Get the indices where single coefficients exist
-            row_indices = np.where(single_coef_rows)[0]
-
-            for row in row_indices:
-                # Get the variable index and coefficient
-                var_idx = CSR.indices[CSR.indptr[row]]
-                coef = CSR.data[CSR.indptr[row]]
-
-                # If coefficient is positive
-                if coef > 0:
-                    # Update bounds
-                    var_upper_bounds[var_idx] = min(var_upper_bounds[var_idx], 
-                                                  upper_bounds[row] / coef)
-                    var_lower_bounds[var_idx] = max(var_lower_bounds[var_idx], 
-                                                  lower_bounds[row] / coef)
-                # If coefficient is negative
-                elif coef < 0:
-                    # Update bounds (note the swap due to negative coefficient)
-                    var_upper_bounds[var_idx] = min(var_upper_bounds[var_idx],
-                                                  lower_bounds[row] / coef)
-                    var_lower_bounds[var_idx] = max(var_lower_bounds[var_idx],
-                                                  upper_bounds[row] / coef)
-
-        # Post-process bounds for integer variables
-        if variable_types is not None:
-
-            # Check if we have any integer variables
-            integer_vars = variable_types == 'I'
-            if np.any(integer_vars):
-                # Only process finite bounds for integer variables
-                finite_lb = np.isfinite(var_lower_bounds[integer_vars])
-                finite_ub = np.isfinite(var_upper_bounds[integer_vars])
-
-                # Update only finite bounds for integer variables
-                if np.any(finite_lb):
-                    var_lower_bounds[integer_vars][finite_lb] = np.ceil(
-                        var_lower_bounds[integer_vars][finite_lb])
-
-                if np.any(finite_ub):
-                    var_upper_bounds[integer_vars][finite_ub] = np.floor(
-                        var_upper_bounds[integer_vars][finite_ub])
-
-            # Convert binary variables to integer type
-            variable_types[binary_vars] = 'I'
-
-        return var_lower_bounds, var_upper_bounds, variable_types
 
     def add_dummy_single_constraint(self, n_variables):
         from scipy import sparse
@@ -352,8 +309,7 @@ class CUOPT(ConicSolver):
         return CSR, lower_bounds, upper_bounds
 
     def solve_via_data(self, data, warm_start: bool, verbose: bool, solver_opts, solver_cache=None):
-
-        use_service = solver_opts.get("use_service", False) in [True,"True","true"]      
+        use_service = solver_opts.get("use_service", False) in [True,"True","true"]
         if self.local_install ^ self.service_install:
             if self.local_install:
                 if use_service:
@@ -364,6 +320,8 @@ class CUOPT(ConicSolver):
                     print("Warning: use_service ignored since cuopt is not installed locally")
                 use_service = True
 
+        # Using copy=False here would be more efficient, but is anything on the calling side
+        # using data[s.A] after this call?  Or is it okay to change it?
         csr = data[s.A].tocsr()
         #csr = data[s.A].tocsr(copy=False)
 
@@ -382,34 +340,22 @@ class CUOPT(ConicSolver):
             lower_bounds = np.empty(leq_end)
             lower_bounds[:leq_start] = data['b'][:leq_start]
             lower_bounds[leq_start:leq_end] = float('-inf')
-
             upper_bounds = data['b'][:leq_end].copy()
 
-       # Determine if we need to extract variable bounds from the constraint matrix
-        extract_var_bounds =  "variable_bounds" not in solver_opts or not (
-                "lower" in solver_opts["variable_bounds"] and
-                "upper" in solver_opts["variable_bounds"])
-        
-        # Set variable types. We will convert B to I after any necessary
-        # bounds extraction so that we can ensure bounds [0,1]
-        variable_types = np.empty(num_vars, dtype='U1')
-        variable_types.fill('C')
+        # Initialize variable types and bounds
+        variable_types = np.full(num_vars, 'C', dtype='U1')
+        variable_lower_bounds = np.full(num_vars, -np.inf)
+        variable_upper_bounds = np.full(num_vars, np.inf)
+
+        # Change bools to ints and set bounds
         is_mip = data[s.BOOL_IDX] or data[s.INT_IDX]
         if is_mip:
-            if extract_var_bounds:
-                # These will be set to I in _extract_variable_bounds after processing
-                variable_types[data[s.BOOL_IDX]] = 'B'
-            else:
-                variable_types[data[s.BOOL_IDX]] = 'I'
-            variable_types[data[s.INT_IDX]] = 'I'
+            # Set variable types
+            variable_types[data[s.BOOL_IDX] + data[s.INT_IDX]] = 'I'
 
-        if extract_var_bounds:
-            (variable_lower_bounds,
-             variable_upper_bounds,
-             variable_types) = self._extract_variable_bounds(csr,
-                                                             lower_bounds,
-                                                             upper_bounds,
-                                                             variable_types)
+            # Set bounds for bool variables to [0,1]
+            variable_lower_bounds[data[s.BOOL_IDX]] = 0
+            variable_upper_bounds[data[s.BOOL_IDX]] = 1
 
         # Now if we have variable bounds in solver_opts, optionally overwrite lower or upper
         if "variable_bounds" in solver_opts:
@@ -418,7 +364,7 @@ class CUOPT(ConicSolver):
                 variable_lower_bounds = vbounds["lower"]
             if "upper" in vbounds:
                 variable_upper_bounds = vbounds["upper"]
-        
+
         if use_service:
             d = {}
             d["maximize"] = False
@@ -463,19 +409,19 @@ class CUOPT(ConicSolver):
                     dual_solution = cuopt_result.get("dual_solution", None)
                     if dual_solution:
                         dual_solution = np.array(dual_solution)
-                        
+
                 primal_solution = cuopt_result.get("primal_solution", None)
                 if primal_solution:
                     primal_solution = np.array(primal_solution)
                 primal_objective = cuopt_result.get("primal_objective", 0.0)
-                                
+
                 cuopt_result = Solution(problem_category=pt,
                                         vars=None,
                                         dual_solution=dual_solution,
                                         primal_solution=primal_solution,
                                         primal_objective=primal_objective,
                                         termination_status=res["status"])
-            
+
         else:
             from cuopt.linear_programming.data_model import DataModel
             from cuopt.linear_programming.solver import Solve
@@ -506,15 +452,17 @@ class CUOPT(ConicSolver):
                     pickle.dump(variable_upper_bounds, f)
                     pickle.dump(variable_types, f)
 
-            
+
             cuopt_result = Solve(data_model, ss)
 
 
         print('Termination reason: ', cuopt_result.get_termination_reason())
-        
+        if cuopt_result.get_error_status() != ErrorStatus.Success:
+            raise ValueError(cuopt_result.get_error_message())
+
         solution = {}
         if is_mip:
-            solution["status"] = self.STATUS_MAP_MIP[cuopt_result.get_termination_reason()]
+            solution["status"] = self.STATUS_MAP_MIP[cuopt_result.get_termination_status()]
         else:
             # This really ought to be a getter but the service version of this class is missing it
             # So just grab the result.
@@ -522,7 +470,7 @@ class CUOPT(ConicSolver):
             if d is not None:
                 solution[s.EQ_DUAL] = -d[0:leq_start]
                 solution[s.INEQ_DUAL] = -d[leq_start:leq_end]
-            solution["status"] = self.STATUS_MAP_LP[cuopt_result.get_termination_reason()]
+            solution["status"] = self.STATUS_MAP_LP[cuopt_result.get_termination_status()]
 
         solution["primal"] = cuopt_result.get_primal_solution()
         solution["value"] = cuopt_result.get_primal_objective()
